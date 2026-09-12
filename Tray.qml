@@ -19,6 +19,32 @@ BarWidget {
   id: root
   moduleName: "io.github.tyrichards.tray"
 
+  // Local compatibility for Omarchy 4.0.3: this container needs the bar's
+  // widget registry and drag coordinator, absent from PluginBarApi.
+  // Resolve only our owning slot's host; other plugins keep their facades.
+  function restoreContainerHost() {
+    if (!bar || "barWidgetRegistry" in bar) return
+    // Built-in sibling widgets retain the host. This is an explicit local
+    // trust exception for this tray, not a change to other plugin APIs.
+    var row = parent && parent.parent ? parent.parent.parent : null
+    if (!row) return
+    for (var i = 0; i < row.children.length; i++) {
+      var slot = row.children[i]
+      var candidate = slot.activeItem && slot.activeItem.bar
+      if (candidate && "barWidgetRegistry" in candidate) {
+        bar = candidate
+        return
+      }
+    }
+  }
+  onBarChanged: Qt.callLater(restoreContainerHost)
+  Timer {
+    interval: 250
+    repeat: true
+    running: !!root.bar && !("barWidgetRegistry" in root.bar)
+    onTriggered: root.restoreContainerHost()
+  }
+
   // Hover-to-expand, driven by the drag-out overlay's single HoverHandler:
   // two stacked hover items (the overlay plus a handler in the drawer) fight
   // over hover and oscillate the reveal, so the overlay is the one authority.
@@ -191,8 +217,12 @@ BarWidget {
     }
   }
 
-  // Match Waybar's group/tray-expander drawer transition-duration.
-  readonly property int animationDuration: 600
+  // Match Waybar's group/tray-expander drawer transition-duration by default,
+  // while allowing a custom duration on the shell.json entry.
+  readonly property int animationDuration: {
+    var configured = Number(settings.animationDuration)
+    return isFinite(configured) && configured >= 0 ? Math.round(configured) : 600
+  }
   property real revealProgress: (expanded || dragOver || ownPopoutActive) ? 1 : 0
 
   Behavior on revealProgress {
@@ -247,6 +277,10 @@ BarWidget {
   Connections {
     target: root.bar
     ignoreUnknownSignals: true
+
+    function onLayoutConfigChanged() {
+      Qt.callLater(root.reconcileHostedWithLayout)
+    }
 
     function onBarDragSourceChanged() {
       var slot = root.bar.barDragSource
@@ -820,6 +854,36 @@ BarWidget {
     return TrayModel.sortByOrder(result, orderIds)
   }
 
+  // A hosted widget lives in at most one place: this drawer or the bar
+  // layout. Capture and release keep that invariant, but outside writers do
+  // not know about this tray's settings — enabling a plugin whose only
+  // placement is here, or `omarchy bar put`, re-inserts the id into the bar
+  // layout while our wrapper is still hosted (the shell's enable scan reads
+  // bar.layout and plugins[], not this entry), and the widget then renders
+  // twice. The layout wins: drop the wrapper, the same end state as a
+  // drag-out. Also collapses duplicate wrappers for one id, which a capture
+  // racing the shell's config reload can produce.
+  function reconcileHostedWithLayout() {
+    var b = root.bar
+    if (!b || !b.layoutConfig) return
+    var wrappers = TrayModel.normalizeWrappers(settings.widgets)
+    if (wrappers.length === 0) return
+    var next = []
+    var seen = {}
+    var dropped = false
+    for (var i = 0; i < wrappers.length; i++) {
+      var id = TrayModel.wrapperId(wrappers[i])
+      if (!id || TrayModel.layoutHasWidget(b.layoutConfig, id) || seen[id]) {
+        dropped = true
+        continue
+      }
+      seen[id] = true
+      next.push(wrappers[i])
+    }
+    if (!dropped) return
+    persistState({ widgets: next })
+  }
+
   // Writes the widget's full inline state. updateEntryInline replaces the
   // whole layout entry, so every persisted key has to ride along on every
   // write or a toggle would silently drop the captured widgets. Keys from
@@ -851,6 +915,8 @@ BarWidget {
   // there is always a drop target to aim at.
   visible: hasDrawerContent || hostedWrappers.length > 0 || dragActive
 
+  onSettingsChanged: Qt.callLater(root.reconcileHostedWithLayout)
+
   // When the manage popup is open, the bar underlines the whole tray — from
   // the chevron's left edge to the last icon — instead of its default 55%
   // fraction of the slot.
@@ -860,16 +926,27 @@ BarWidget {
   implicitWidth: root.vertical ? root.barSize : trayContent.implicitWidth
   implicitHeight: root.vertical ? trayContent.implicitHeight : root.barSize
 
+  // Island-style bar replacements (e.g. mscurtescu.island-bar) swap the
+  // stock full-height slab for inset rounded pills and expose their geometry
+  // on the bar root (islandInset/islandPad). The pill spans this widget's
+  // whole slot — the island is sized to the row plus its padding — so the
+  // island itself grounds the drawer, and the full-height square backdrop
+  // below would protrude from the pill and square off its rounded cap.
+  readonly property bool islandHost: !!root.bar && typeof root.bar.islandInset === "number"
+
   // Backdrop while the drawer is out: the tray paints over other sections it
   // overruns, but its content is sparse glyphs — without a ground, whatever
   // sits underneath shows through the gaps un-dimmed. The scrim handles the
   // center content BESIDE the drawer; this covers what is directly under it.
   // Opaque bars get the solid background; a transparent VERTICAL bar gets
   // the same dark tint as its scrim (so under-drawer content dims with the
-  // rest of the center); a transparent horizontal bar stays pristine.
+  // rest of the center); a transparent horizontal bar stays pristine. An
+  // opaque island host is skipped: its pill is the ground, exactly as the
+  // stock bar's slab is for the stock tray.
   Rectangle {
     anchors.fill: parent
     visible: root.drawerOut && (root.vertical || !root.barTransparent)
+      && (!root.islandHost || root.barTransparent)
     color: root.barTransparent ? "black" : (root.bar ? root.bar.background : Color.background)
     opacity: (root.barTransparent ? 0.5 : 1.0) * root.revealProgress
   }
