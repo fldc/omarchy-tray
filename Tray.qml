@@ -26,17 +26,25 @@ BarWidget {
     ? bar.shell.serviceFor(root.moduleName) : null
   readonly property var hostedWidgetRegistry: trayService ? trayService.barWidgetRegistry : null
 
-  // Hover-to-expand, driven by the drag-out overlay's single HoverHandler:
-  // two stacked hover items (the overlay plus a handler in the drawer) fight
-  // over hover and oscillate the reveal, so the overlay is the one authority.
+  // The drag-out overlay is the single hover authority. Only entering the
+  // chevron arms expansion; crossing the open drawer keeps it armed until the
+  // pointer leaves. Two stacked hover items would fight over the reveal.
   // While another widget's panel is open, its focus grab swallows hover
   // entirely, so the drawer cannot open by pointing at it — but clicks still
   // arrive, so a deliberate chevron click holds it open (clickExpanded) until
   // that panel closes.
-  property bool expanded: clickExpanded || (overlayHover.hovered && !exteriorPopoutOpen)
+  property bool hoverExpanded: false
+  property bool expanded: clickExpanded || (hoverExpanded && !exteriorPopoutOpen)
   readonly property bool exteriorPopoutOpen: root.bar && root.bar.activePopout ? !ownPopoutActive : false
   property bool clickExpanded: false
   onExteriorPopoutOpenChanged: if (!exteriorPopoutOpen) clickExpanded = false
+
+  function updateHoverExpansion() {
+    var point = overlayHover.point.position
+    hoverExpanded = TrayModel.nextHoverExpansion(hoverExpanded, overlayHover.hovered,
+      point.x, point.y, root.vertical, chevronExtent, root.barSize)
+    if (!overlayHover.hovered) clickExpanded = false
+  }
 
   function closeExteriorPopout() {
     var popout = root.bar ? root.bar.activePopout : null
@@ -597,7 +605,8 @@ BarWidget {
     // widgets' own hover styling and tooltips still work underneath.
     HoverHandler {
       id: overlayHover
-      onHoveredChanged: if (!hovered) root.clickExpanded = false
+      onHoveredChanged: root.updateHoverExpansion()
+      onPointChanged: root.updateHoverExpansion()
       cursorShape: {
         var slot = dragOutOverlay.parent
         if (root && root.bar && slot !== root && typeof root.bar.moduleClickTargetAt === "function"
@@ -954,14 +963,14 @@ BarWidget {
   // overruns, but its content is sparse glyphs — without a ground, whatever
   // sits underneath shows through the gaps un-dimmed. The scrim handles the
   // center content BESIDE the drawer; this covers what is directly under it.
-  // Opaque bars get the solid background; a transparent VERTICAL bar gets
-  // the same dark tint as its scrim (so under-drawer content dims with the
-  // rest of the center); a transparent horizontal bar stays pristine.
+  // On a horizontal bar, paint behind the drawer even when the bar is
+  // transparent: otherwise covered widgets remain visible as false targets.
+  // A transparent vertical bar keeps the same tint as its center scrim.
   Rectangle {
     anchors.fill: parent
-    visible: root.drawerOut && (root.vertical || !root.barTransparent)
-    color: root.barTransparent ? "black" : (root.bar ? root.bar.background : Color.background)
-    opacity: (root.barTransparent ? 0.5 : 1.0) * root.revealProgress
+    visible: root.drawerOut
+    color: root.vertical && root.barTransparent ? "black" : (root.bar ? root.bar.background : Color.background)
+    opacity: (root.vertical && root.barTransparent ? 0.5 : 1.0) * root.revealProgress
   }
 
   Loader {
