@@ -192,7 +192,10 @@ BarWidget {
     })
   }
   onHostedWrappersChanged: Qt.callLater(reconcileHostedPlugins)
-  Component.onCompleted: Qt.callLater(reconcileHostedPlugins)
+  Component.onCompleted: {
+    Qt.callLater(reconcileHostedPlugins)
+    installTooltipRelay()
+  }
 
   // The drawer's single mixed model: hosted widgets and tray icons in one
   // ordered sequence.
@@ -1533,7 +1536,6 @@ BarWidget {
   }
 
   onBarChanged: installTooltipRelay()
-  Component.onCompleted: installTooltipRelay()
   Component.onDestruction: removeTooltipRelay()
 
   PopupWindow {
