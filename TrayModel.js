@@ -262,6 +262,17 @@ function movedBefore(order, id, beforeId) {
   return ids
 }
 
+// Opening is armed only by entering the chevron. Once armed, crossing the
+// drawer keeps it open until the pointer leaves the tray altogether.
+function nextHoverExpansion(wasOpen, hovered, x, y, vertical, chevronExtent, barSize) {
+  if (!hovered) return false
+  if (wasOpen) return true
+  if (chevronExtent <= 0) return false
+  var main = vertical ? y : x
+  var cross = vertical ? x : y
+  return main >= 0 && main <= chevronExtent && cross >= 0 && cross <= barSize
+}
+
 if (typeof module !== "undefined") {
   module.exports = {
     asList: asList,
@@ -278,6 +289,7 @@ if (typeof module !== "undefined") {
     captureIntoTray: captureIntoTray,
     dragOutOfTray: dragOutOfTray,
     sortByOrder: sortByOrder,
-    movedBefore: movedBefore
+    movedBefore: movedBefore,
+    nextHoverExpansion: nextHoverExpansion
   }
 }
