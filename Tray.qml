@@ -27,6 +27,22 @@ BarWidget {
     ? bar.shell.serviceFor(root.moduleName) : null
   readonly property var hostedWidgetRegistry: trayService ? trayService.barWidgetRegistry : null
 
+  // Retain custom-module support from PR #10 with the newer scoped service.
+  function customModuleType(entry) {
+    if (root.bar && typeof root.bar.customModuleType === "function")
+      return String(root.bar.customModuleType(entry) || "")
+    return TrayModel.customModuleType(entry)
+  }
+
+  function customModuleSource(entry) {
+    if (root.bar && typeof root.bar.customModuleSource === "function")
+      return root.bar.customModuleSource(entry)
+    var home = Quickshell.env("HOME")
+    var config = Quickshell.env("XDG_CONFIG_HOME") || home + "/.config"
+    var path = TrayModel.customModulePath(entry, home, config + "/omarchy")
+    return path ? Util.fileUrl(path) : ""
+  }
+
   // The drag-out overlay is the single hover authority. Only entering the
   // chevron arms expansion; crossing the open drawer keeps it armed until the
   // pointer leaves. Two stacked hover items would fight over the reveal.
@@ -2199,8 +2215,7 @@ BarWidget {
     readonly property var entry: modelData && modelData.entry ? modelData.entry : ({})
     readonly property string widgetId: TrayModel.entryId(entry)
     readonly property var widgetSettings: TrayModel.entrySettings(entry)
-    readonly property string customType: root.bar && typeof root.bar.customModuleType === "function"
-      ? String(root.bar.customModuleType(entry) || "") : ""
+    readonly property string customType: root.customModuleType(entry)
     readonly property var registryComponent: {
       if (customType) return null
       var registry = root.hostedWidgetRegistry
@@ -2253,8 +2268,7 @@ BarWidget {
     Loader {
       id: qmlLoader
       active: hostedRoot.customType === "qml"
-      source: active && root.bar && typeof root.bar.customModuleSource === "function"
-        ? root.bar.customModuleSource(hostedRoot.entry) : ""
+      source: active ? root.customModuleSource(hostedRoot.entry) : ""
       anchors.fill: parent
       onLoaded: {
         hostedRoot.injectProps()
